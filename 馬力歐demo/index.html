@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>馬力歐小demo</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #5c94fc; 
+        }
+        canvas {
+            border: 3px solid #000;
+        }
+    </style>
+</head>
+<body>
+
+<script>
+
+class MarioScene extends Phaser.Scene {
+    constructor() {
+        super('MarioScene');
+        this.player = null;
+        this.platforms = null;
+        this.coins = null;
+        this.enemies = null;
+        this.keys = null;
+        this.score = 0;
+        this.scoreText = null;
+        this.fpsText = null;
+        this.objectCountText = null;
+        this.entityCount = 0;
+        this.playerHealth = 3;
+        this.hearts = null;
+    }
+
+    preload() {
+        this.load.image('sky', 'assets/sky.png');
+        this.load.spritesheet('terrain', 'assets/grass.png', { frameWidth: 16, frameHeight: 16 });
+        this.load.image('heart', 'https://raw.githubusercontent.com/photonstorm/phaser3-examples/master/public/assets/sprites/heart.png');
+        this.load.spritesheet('coin', 'https://labs.phaser.io/assets/sprites/coin.png', { frameWidth: 32, frameHeight: 32 });
+        this.load.spritesheet('player', 'https://labs.phaser.io/assets/sprites/dude.png', { frameWidth: 32, frameHeight: 48 });
+        this.load.spritesheet('goomba', 'https://labs.phaser.io/assets/sprites/metalslug_monster39x40.png', { frameWidth: 39, frameHeight: 40 });
+    }
+
+    create() {
+        this.physics.world.setBounds(0, 0, 3200, 600);
+        this.cameras.main.setBounds(0, 0, 3200, 600);
+        this.add.image(400, 300, 'sky').setScrollFactor(0);
+
+        this.scoreText = this.add.text(16, 16, '分數: 0', { fontSize: '32px', fill: '#000' }).setScrollFactor(0);
+        this.fpsText = this.add.text(16, 50, 'FPS: 60', { fontSize: '20px', fill: '#000' }).setScrollFactor(0);
+        this.objectCountText = this.add.text(16, 75, '物件數: 0', { fontSize: '20px', fill: '#000' }).setScrollFactor(0);
+
+        this.hearts = this.add.group();
+        this.playerHealth = 3;
+        const heartScale = 0.15;
+        const heartOffset = 20;
+        const heartSpacing = 20;
+
+        for (let i = 0; i < this.playerHealth; i++) {
+            const heart = this.hearts.create(
+                config.width - heartOffset - (i * heartSpacing),
+                heartOffset,
+                'heart'
+            );
+            heart.setOrigin(1, 0);
+            heart.setScale(heartScale); 
+            heart.setScrollFactor(0);
+        }
+
+        this.platforms = this.physics.add.staticGroup();
+
+        for (let i = 0; i < 200; i++) {
+            this.platforms.create(i * 16, 584, 'terrain', 2).setOrigin(0,0).refreshBody();
+        }
+
+        for (let i = 0; i < 10; i++) {
+            this.platforms.create(600 + (i * 16), 450, 'terrain', 225).setOrigin(0,0).refreshBody();
+        }
+
+        this.performanceBlock = this.platforms.create(800, 450, 'terrain', 231).setOrigin(0,0).refreshBody();
+        this.performanceBlock.isHit = false;
+
+        this.player = this.physics.add.sprite(100, 450, 'player');
+        this.player.setBounce(0.1);
+        this.player.setCollideWorldBounds(true);
+        this.player.setGravityY(300);
+        this.player.isInvincible = false;
+        this.cameras.main.startFollow(this.player);
+
+        this.anims.create({ key: 'left', frames: this.anims.generateFrameNumbers('player', { start: 0, end: 3 }), frameRate: 10, repeat: -1 });
+        this.anims.create({ key: 'turn', frames: [{ key: 'player', frame: 4 }], frameRate: 20 });
+        this.anims.create({ key: 'right', frames: this.anims.generateFrameNumbers('player', { start: 5, end: 8 }), frameRate: 10, repeat: -1 });
+        this.anims.create({ key: 'goomba_walk', frames: this.anims.generateFrameNumbers('goomba', { start: 0, end: 3 }), frameRate: 5, repeat: -1 });
+        this.anims.create({ key: 'coin_spin', frames: this.anims.generateFrameNumbers('coin', { start: 0, end: 5 }), frameRate: 10, repeat: -1 });
+
+        this.coins = this.physics.add.group({ key: 'coin', repeat: 20, setXY: { x: 300, y: 0, stepX: 120 } });
+        this.coins.children.iterate((child) => child.play('coin_spin'));
+
+        this.enemies = this.physics.add.group();
+        this.addEnemy(400, 450);
+        this.addEnemy(900, 350);
+        
+        this.physics.add.collider(this.player, this.platforms, this.playerHitPlatform, null, this);
+        this.physics.add.collider(this.player, this.enemies, this.hitEnemy, this.checkEnemyHit, this);
+        this.physics.add.collider(this.enemies, this.platforms);
+        this.physics.add.collider(this.enemies, this.enemies);
+        this.physics.add.collider(this.coins, this.platforms);
+        this.physics.add.overlap(this.player, this.coins, this.collectCoin, null, this);
+        
+        this.keys = this.input.keyboard.addKeys('W,A,S,D');
+        
+        this.updateEntityCount();
+    }
+
+    update() {
+        if (!this.player.active) return; 
+
+        if (this.keys.A.isDown) {
+            this.player.setVelocityX(-200);
+            this.player.anims.play('left', true);
+        } else if (this.keys.D.isDown) {
+            this.player.setVelocityX(200);
+            this.player.anims.play('right', true);
+        } else {
+            this.player.setVelocityX(0);
+            this.player.anims.play('turn');
+        }
+
+        if (this.keys.W.isDown && this.player.body.blocked.down) {
+            this.player.setVelocityY(-500);
+        }
+
+        this.fpsText.setText('FPS: ' + Math.floor(this.game.loop.actualFps));
+    }
+
+    updateEntityCount() {
+        let count = 1; 
+        if (this.coins) count += this.coins.countActive(true);
+        if (this.enemies) count += this.enemies.countActive(true);
+        this.entityCount = count;
+        this.objectCountText.setText('物件數: ' + this.entityCount);
+    }
+    
+    addEnemy(x, y) {
+        const enemy = this.enemies.create(x, y, 'goomba');
+        enemy.setBounce(0.2);
+        enemy.setCollideWorldBounds(true);
+        enemy.setVelocityX(50);
+        enemy.anims.play('goomba_walk', true);
+        enemy.body.setSize(30, 30).setOffset(5, 10);
+        this.updateEntityCount();
+        return enemy;
+    }
+
+    playerHitPlatform(player, platform) {
+        if (platform === this.performanceBlock && player.body.touching.up && platform.body.touching.down && !platform.isHit) {
+            platform.isHit = true;
+            this.add.text(platform.x, platform.y - 50, '效能測試!', { fontSize: '20px', fill: '#ff0000' }).setOrigin(0.5);
+            
+            for (let i = 0; i < 150; i++) {
+                const x = Phaser.Math.Between(platform.x - 200, platform.x + 200);
+                const y = platform.y - 100;
+                const newEnemy = this.addEnemy(x, y);
+                newEnemy.setVelocity(Phaser.Math.Between(-100, 100), -300);
+            }
+        }
+    }
+
+    collectCoin(player, coin) {
+        coin.disableBody(true, true);
+        this.score += 10;
+        this.scoreText.setText('分數: ' + this.score);
+        this.updateEntityCount();
+    }
+    
+    checkEnemyHit(player, enemy) {
+        return !player.isInvincible;
+    }
+
+    hitEnemy(player, enemy) {
+        if (!player.active) return; 
+
+        if (player.body.velocity.y > 0 && player.body.bottom < enemy.body.y + 10) {
+            enemy.disableBody(true, true);
+            this.updateEntityCount();
+            player.setVelocityY(-200);
+            this.score += 50;
+            this.scoreText.setText('分數: ' + this.score);
+        } 
+        else {
+            this.playerHealth--;
+            const heartToRemove = this.hearts.getLast(true);
+            if (heartToRemove) {
+                heartToRemove.destroy();
+            }
+
+            if (this.playerHealth <= 0) {
+                player.active = false;
+                this.physics.pause();
+                player.setTint(0xff0000);
+                player.anims.play('turn');
+                this.add.text(config.width / 2, config.height / 2, '遊戲結束', { fontSize: '64px', fill: '#000' }).setOrigin(0.5).setScrollFactor(0);
+                
+                this.time.delayedCall(2000, () => {
+                    this.score = 0;
+                    this.scene.restart();
+                });
+            } 
+            else {
+                player.isInvincible = true;
+                this.tweens.add({
+                    targets: player,
+                    alpha: 0.5,
+                    duration: 100,
+                    ease: 'Power1',
+                    yoyo: true,
+                    repeat: 5,
+                    onComplete: () => {
+                        player.setAlpha(1);
+                        player.isInvincible = false;
+                    }
+                });
+            }
+        }
+    }
+}
+
+const config = {
+    type: Phaser.AUTO,
+    width: 800,
+    height: 600,
+    parent: 'phaser-demo',
+    physics: {
+        default: 'arcade',
+        arcade: {
+            gravity: { y: 500 },
+            debug: false
+        }
+    },
+    scene: [MarioScene]
+};
+
+const game = new Phaser.Game(config);
+
+</script>
+
+</body>
+</html>
