@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>接星星 Demo</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #2d2d2d;
+        }
+        canvas {
+            border: 2px solid #fff;
+        }
+    </style>
+</head>
+<body>
+
+<script>
+
+class CoinCatcherScene extends Phaser.Scene {
+    constructor() {
+        super('CoinCatcherScene');
+        this.player = null;
+        this.stars = null;
+        this.bombs = null;
+        this.cursors = null;
+        this.score = 0;
+        this.scoreText = null;
+        this.gameOver = false;
+        this.timerValue = 60;
+        this.timerText = null;
+        this.starSpawner = null;
+        this.bombSpawner = null;
+        this.fpsText = null;
+        this.objectCountText = null;
+        this.entityCount = 0;
+    }
+
+    preload() {
+        this.load.image('sky', 'https://labs.phaser.io/assets/skies/space3.png');
+        this.load.image('star', 'https://labs.phaser.io/assets/sprites/star.png');
+        this.load.image('bomb', 'assets/bomb.png'); 
+        this.load.spritesheet('dude', 'https://labs.phaser.io/assets/sprites/dude.png', { frameWidth: 32, frameHeight: 48 });
+    }
+
+    create() {
+        this.score = 0;
+        this.timerValue = 60;
+        this.gameOver = false;
+
+        this.add.image(400, 300, 'sky');
+        
+        this.player = this.physics.add.sprite(400, 500, 'dude');
+        this.player.setCollideWorldBounds(true);
+        this.player.body.allowGravity = false;
+
+        this.anims.create({ key: 'left', frames: this.anims.generateFrameNumbers('dude', { start: 0, end: 3 }), frameRate: 10, repeat: -1 });
+        this.anims.create({ key: 'turn', frames: [ { key: 'dude', frame: 4 } ], frameRate: 20 });
+        this.anims.create({ key: 'right', frames: this.anims.generateFrameNumbers('dude', { start: 5, end: 8 }), frameRate: 10, repeat: -1 });
+
+        this.stars = this.physics.add.group();
+        this.bombs = this.physics.add.group();
+
+        this.physics.add.overlap(this.player, this.stars, this.collectStar, null, this);
+        this.physics.add.overlap(this.player, this.bombs, this.hitBomb, null, this);
+
+        this.scoreText = this.add.text(16, 16, '分數: 0', { fontSize: '32px', fill: '#fff' });
+        this.timerText = this.add.text(config.width - 16, 16, '時間: ' + this.timerValue, { fontSize: '32px', fill: '#fff' }).setOrigin(1, 0);
+        this.fpsText = this.add.text(16, 50, 'FPS: 60', { fontSize: '20px', fill: '#fff' });
+        this.objectCountText = this.add.text(16, 75, '物件數: 0', { fontSize: '20px', fill: '#fff' });
+
+        this.cursors = this.input.keyboard.createCursorKeys();
+
+        this.starSpawner = this.time.addEvent({ delay: 800, callback: this.spawnStar, callbackScope: this, loop: true });
+        this.bombSpawner = this.time.addEvent({ delay: 2000, callback: this.spawnBomb, callbackScope: this, loop: true });
+        
+        this.time.addEvent({ delay: 1000, callback: this.updateTimer, callbackScope: this, loop: true });
+
+        this.updateEntityCount();
+    }
+
+    update() {
+        this.fpsText.setText('FPS: ' + Math.floor(this.game.loop.actualFps));
+
+        if (this.gameOver) {
+            return;
+        }
+
+        if (this.cursors.left.isDown) {
+            this.player.setVelocityX(-350);
+            this.player.anims.play('left', true);
+        } else if (this.cursors.right.isDown) {
+            this.player.setVelocityX(350);
+            this.player.anims.play('right', true);
+        } else {
+            this.player.setVelocityX(0);
+            this.player.anims.play('turn');
+        }
+
+        this.cleanupOffscreenObjects(this.stars);
+        this.cleanupOffscreenObjects(this.bombs);
+    }
+
+    cleanupOffscreenObjects(group) {
+        group.children.each(child => {
+            if (child && child.y > config.height + 50) {
+                child.destroy();
+                this.updateEntityCount();
+            }
+        });
+    }
+    
+    updateEntityCount() {
+        let count = 1; 
+        if (this.stars) count += this.stars.countActive(true);
+        if (this.bombs) count += this.bombs.countActive(true);
+        this.entityCount = count;
+        this.objectCountText.setText('物件數: ' + this.entityCount);
+    }
+
+    updateTimer() {
+        if (this.gameOver) return;
+        this.timerValue--;
+        this.timerText.setText('時間: ' + this.timerValue);
+        if (this.timerValue <= 0) {
+            this.endGame();
+        }
+    }
+
+    spawnStar() {
+        const x = Phaser.Math.Between(50, 750);
+        const star = this.stars.create(x, -50, 'star');
+        star.setScale(0.5);
+        star.setVelocityY(Phaser.Math.Between(100, 200));
+        this.updateEntityCount();
+    }
+
+    spawnBomb() {
+        const x = Phaser.Math.Between(50, 750);
+        const bomb = this.bombs.create(x, -50, 'bomb');
+        bomb.setScale(0.2);
+        bomb.setVelocityY(Phaser.Math.Between(150, 250));
+        this.updateEntityCount();
+    }
+
+    collectStar(player, star) {
+        star.destroy();
+        this.score += 10;
+        this.scoreText.setText('分數: ' + this.score);
+        this.updateEntityCount();
+    }
+
+    hitBomb(player, bomb) {
+        bomb.destroy();
+        this.score -= 20;
+        this.scoreText.setText('分數: ' + this.score);
+        this.updateEntityCount();
+
+        this.cameras.main.shake(100, 0.01);
+        player.setTint(0xff0000);
+        this.time.delayedCall(100, () => {
+            player.clearTint();
+        });
+    }
+
+    endGame() {
+        this.gameOver = true;
+        this.physics.pause();
+        this.player.anims.play('turn');
+
+        this.starSpawner.remove();
+        this.bombSpawner.remove();
+        
+        const gameOverText = `時間到！\n\n你的分數: ${this.score}\n\n點擊畫面重新開始`;
+        this.add.text(400, 300, gameOverText, { 
+            fontSize: '48px', 
+            fill: '#fff', 
+            align: 'center',
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            padding: { x: 20, y: 20 }
+        }).setOrigin(0.5);
+
+        this.input.once('pointerdown', () => {
+            this.scene.restart();
+        });
+    }
+}
+
+const config = {
+    type: Phaser.AUTO,
+    width: 800,
+    height: 600,
+    physics: {
+        default: 'arcade',
+        arcade: {
+            debug: false
+        }
+    },
+    scene: CoinCatcherScene
+};
+
+const game = new Phaser.Game(config);
+
+</script>
+
+</body>
+</html>
