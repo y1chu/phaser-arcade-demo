@@ -33,7 +33,6 @@ class MarioScene extends Phaser.Scene {
         this.scoreText = null;
         this.fpsText = null;
         this.objectCountText = null;
-        this.entityCount = 0;
         this.playerHealth = 3;
         this.hearts = null;
     }
@@ -48,6 +47,13 @@ class MarioScene extends Phaser.Scene {
     }
 
     create() {
+        this.score = 0;
+        this.playerHealth = 3;
+        this.gameOver = false;
+
+        // 功能: 設定物理世界的邊界
+        // 原理: `setBounds` 會在遊戲世界中建立四個看不見的牆壁
+        // 為何: 這樣可以防止玩家或任何設定了 `setCollideWorldBounds(true)` 的物件跑出遊戲畫面
         this.physics.world.setBounds(0, 0, 3200, 600);
         this.cameras.main.setBounds(0, 0, 3200, 600);
         this.add.image(400, 300, 'sky').setScrollFactor(0);
@@ -57,39 +63,35 @@ class MarioScene extends Phaser.Scene {
         this.objectCountText = this.add.text(16, 75, '物件數: 0', { fontSize: '20px', fill: '#000' }).setScrollFactor(0);
 
         this.hearts = this.add.group();
-        this.playerHealth = 3;
-        const heartScale = 0.15;
-        const heartOffset = 20;
-        const heartSpacing = 20;
-
         for (let i = 0; i < this.playerHealth; i++) {
-            const heart = this.hearts.create(
-                config.width - heartOffset - (i * heartSpacing),
-                heartOffset,
-                'heart'
-            );
-            heart.setOrigin(1, 0);
-            heart.setScale(heartScale); 
-            heart.setScrollFactor(0);
+            const heart = this.hearts.create(config.width - 20 - (i * 20), 20, 'heart');
+            heart.setOrigin(1, 0).setDisplaySize(16, 16).setScrollFactor(0);
         }
 
+        // 功能: 建立一個「靜態」物理群組來存放所有平台
+        // 原理: `staticGroup` 裡的物件不受重力影響，且無法被其他物件推動
+        // 為何: 地面和磚塊是固定不動的，使用靜態群組是管理它們的最佳方式
         this.platforms = this.physics.add.staticGroup();
 
         for (let i = 0; i < 200; i++) {
             this.platforms.create(i * 16, 584, 'terrain', 2).setOrigin(0,0).refreshBody();
         }
-
         for (let i = 0; i < 10; i++) {
             this.platforms.create(600 + (i * 16), 450, 'terrain', 225).setOrigin(0,0).refreshBody();
         }
-
         this.performanceBlock = this.platforms.create(800, 450, 'terrain', 231).setOrigin(0,0).refreshBody();
         this.performanceBlock.isHit = false;
 
+        // 功能: 建立一個受物理引擎控制的玩家角色 (Sprite)
+        // 原理: `this.physics.add.sprite` 會建立一個同時具有「圖片」和「物理身體(body)」的物件
+        // 為何: 只有受物理引擎控制的物件，才能進行速度設定、碰撞檢測等物理相關操作
         this.player = this.physics.add.sprite(100, 450, 'player');
+        
+        // 功能: 設定玩家的反彈係數
+        // 原理: `setBounce` 的值介於 0 (完全不反彈) 到 1 (完全反彈) 之間
+        // 為何: 給予一個微小的反彈值 (0.1) 可以讓角色落地時有更自然的感覺
         this.player.setBounce(0.1);
         this.player.setCollideWorldBounds(true);
-        this.player.setGravityY(300);
         this.player.isInvincible = false;
         this.cameras.main.startFollow(this.player);
 
@@ -99,22 +101,41 @@ class MarioScene extends Phaser.Scene {
         this.anims.create({ key: 'goomba_walk', frames: this.anims.generateFrameNumbers('goomba', { start: 0, end: 3 }), frameRate: 5, repeat: -1 });
         this.anims.create({ key: 'coin_spin', frames: this.anims.generateFrameNumbers('coin', { start: 0, end: 5 }), frameRate: 10, repeat: -1 });
 
-        this.coins = this.physics.add.group({ key: 'coin', repeat: 20, setXY: { x: 300, y: 0, stepX: 120 } });
-        this.coins.children.iterate((child) => child.play('coin_spin'));
+        this.coins = this.physics.add.group(); // 金幣是動態物件
+        this.enemies = this.physics.add.group(); // 敵人也是動態物件
 
-        this.enemies = this.physics.add.group();
+        for (let i = 0; i < 20; i++) {
+            const x = Phaser.Math.Between(300, 2800);
+            const y = Phaser.Math.Between(200, 400);
+            const coin = this.coins.create(x, y, 'coin');
+            coin.play('coin_spin');
+        }
+
         this.addEnemy(400, 450);
         this.addEnemy(900, 350);
         
+        // 功能: 設定玩家與平台之間的「碰撞器」
+        // 原理: `collider` 會持續偵測兩個物件 (player, platforms) 的物理邊界是否接觸。一旦接觸，物理引擎會自動介入，防止它們互相穿透
+        // 為何: 這是實現平台遊戲最核心的功能，讓玩家可以「站」在平台上
         this.physics.add.collider(this.player, this.platforms, this.playerHitPlatform, null, this);
+
+        // 功能: 設定玩家與敵人之間的碰撞器，並掛載了兩個回呼函式
+        // 原理: 這是 collider 的進階用法
+        //   - 第三個參數 (this.hitEnemy): 碰撞「後」處理 (collideCallback)。當一次有效的碰撞發生後，這個函式會被調用
+        //   - 第四個參數 (this.checkEnemyHit): 碰撞「前」處理 (processCallback)。在物理引擎確定要處理碰撞前，會先調用此函式。如果它回傳 false，則本次碰撞會被忽略
+        // 為何: 我們需要這種複雜的邏輯來判斷「玩家是踩到敵人頭上」還是「被敵人從側面撞到」，並執行不同的後果
         this.physics.add.collider(this.player, this.enemies, this.hitEnemy, this.checkEnemyHit, this);
+        
         this.physics.add.collider(this.enemies, this.platforms);
         this.physics.add.collider(this.enemies, this.enemies);
         this.physics.add.collider(this.coins, this.platforms);
+
+        // 功能: 設定玩家與金幣之間的「重疊器」
+        // 原理: `overlap` 只偵測物件邊界是否接觸，但「不會」產生任何物理反應 (例如阻擋或反彈)。它只會觸發回呼函式
+        // 為何: 玩家吃到金幣時，我們希望金幣消失並加分，而不是被金幣擋住去路。所以 `overlap` 是最適合的選擇
         this.physics.add.overlap(this.player, this.coins, this.collectCoin, null, this);
         
         this.keys = this.input.keyboard.addKeys('W,A,S,D');
-        
         this.updateEntityCount();
     }
 
@@ -132,6 +153,9 @@ class MarioScene extends Phaser.Scene {
             this.player.anims.play('turn');
         }
 
+        // 功能: 檢查玩家是否可以跳躍
+        // 原理: `player.body.blocked.down` 是物理引擎提供的一個屬性。當玩家的物理邊界底部被一個靜態物件 (如此處的平台) 阻擋時，這個屬性會變為 true
+        // 為何: 我們只允許玩家在站穩在地面上時才能跳躍，以防止無限段跳
         if (this.keys.W.isDown && this.player.body.blocked.down) {
             this.player.setVelocityY(-500);
         }
@@ -143,8 +167,7 @@ class MarioScene extends Phaser.Scene {
         let count = 1; 
         if (this.coins) count += this.coins.countActive(true);
         if (this.enemies) count += this.enemies.countActive(true);
-        this.entityCount = count;
-        this.objectCountText.setText('物件數: ' + this.entityCount);
+        this.objectCountText.setText('物件數: ' + count);
     }
     
     addEnemy(x, y) {
@@ -180,12 +203,18 @@ class MarioScene extends Phaser.Scene {
     }
     
     checkEnemyHit(player, enemy) {
+        // 功能: 碰撞前的條件判斷
+        // 原理: 這是 collider 的 processCallback。它會在物理分離或觸發 hitEnemy 之前運行
+        // 為何: 在這裡檢查玩家是否處於無敵狀態。如果 `isInvincible` 為 true，我們就回傳 false，物理引擎就會完全忽略這次碰撞，玩家不會受傷也不會踩死敵人
         return !player.isInvincible;
     }
 
     hitEnemy(player, enemy) {
         if (!player.active) return; 
 
+        // 功能: 判斷玩家是否是從上方踩到敵人
+        // 原理: `player.body.velocity.y > 0` 確保玩家正在下落。`player.body.bottom < enemy.body.y + 10` 則判斷玩家的腳底是否在敵人的頭頂上方一小段範圍內
+        // 為何: 這是平台遊戲中區分「踩踏」和「碰撞」的經典方法，利用物理引擎提供的即時速度和位置資訊來實現遊戲邏輯
         if (player.body.velocity.y > 0 && player.body.bottom < enemy.body.y + 10) {
             enemy.disableBody(true, true);
             this.updateEntityCount();
@@ -208,7 +237,6 @@ class MarioScene extends Phaser.Scene {
                 this.add.text(config.width / 2, config.height / 2, '遊戲結束', { fontSize: '64px', fill: '#000' }).setOrigin(0.5).setScrollFactor(0);
                 
                 this.time.delayedCall(2000, () => {
-                    this.score = 0;
                     this.scene.restart();
                 });
             } 
@@ -236,6 +264,10 @@ const config = {
     width: 800,
     height: 600,
     parent: 'phaser-demo',
+
+    // 功能: 在遊戲設定中啟用 Arcade 物理引擎
+    // 原理: `default: 'arcade'` 將 Arcade Physics 設為預設引擎。`arcade: { ... }` 區塊可以讓我們設定該引擎的全域屬性
+    // 為何: 這是所有物理效果的基礎。我們在這裡設定了全域重力 `gravity: { y: 500 }`，讓所有動態物理物件 (如玩家、敵人) 都會受到向下的力
     physics: {
         default: 'arcade',
         arcade: {

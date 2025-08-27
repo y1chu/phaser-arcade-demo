@@ -22,8 +22,13 @@
 class Enemy extends Phaser.Physics.Arcade.Sprite {
     constructor(scene, x, y) {
         super(scene, x, y, 'enemy');
+
+        // 功能: 確保這個自訂物件被正式加入到場景的顯示列表和物理世界中
+        // 原理: `scene.add.existing` 讓物件可見，`scene.physics.add.existing` 賦予它物理身體
+        // 為何: 這是自訂物理 Sprite 類別的標準初始化流程，確保它能被正確渲染和進行物理運算
         scene.add.existing(this);
         scene.physics.add.existing(this);
+
         this.hp = 0;
         this.maxHp = 0;
         this.hpBar = scene.add.graphics();
@@ -32,6 +37,10 @@ class Enemy extends Phaser.Physics.Arcade.Sprite {
     spawn(x, y) {
         this.setPosition(x, y);
         this.setActive(true).setVisible(true);
+
+        // 功能: 啟用這個物件的物理身體
+        // 原理: 當物件被回收再利用時，它的物理身體可能已被禁用。`body.enable = true` 會重新激活它，讓它可以再次移動和碰撞
+        // 為何: 這是物件池模式中的關鍵一步，確保回收的敵機能夠正常運作
         this.body.enable = true;
         this.maxHp = Phaser.Math.Between(1, 10);
         this.hp = this.maxHp;
@@ -52,7 +61,6 @@ class Enemy extends Phaser.Physics.Arcade.Sprite {
         const barY = this.y - 30;
         const barWidth = 40;
         const barHeight = 5;
-
         this.hpBar.fillStyle(0xff0000);
         this.hpBar.fillRect(barX, barY, barWidth, barHeight);
         this.hpBar.fillStyle(0x00ff00);
@@ -66,14 +74,16 @@ class Enemy extends Phaser.Physics.Arcade.Sprite {
         if (this.hp <= 0) {
             this.scene.score += this.maxHp * 10;
             this.scene.scoreText.setText('分數: ' + this.scene.score);
-
             const explosion = this.scene.add
                 .sprite(this.x, this.y, 'explosion')
                 .play('explode');
             explosion.on('animationcomplete', () => explosion.destroy());
 
-            this.setActive(false).setVisible(false);
+            // 功能: 停用這個物件的物理身體
+            // 原理: `body.enable = false` 會讓物理引擎在下一次運算時忽略這個物件，它將不再移動或觸發任何碰撞
+            // 為何: 在物件死亡但尚未銷毀的過渡階段 (例如播放死亡動畫時)，禁用物理身體可以防止它繼續與其他物體互動
             this.body.enable = false;
+            this.setActive(false).setVisible(false);
             this.hpBar.clear();
         }
     }
@@ -88,7 +98,7 @@ class Enemy extends Phaser.Physics.Arcade.Sprite {
             }
         }
     }
-
+    
     preDestroy() {
         if (this.hpBar) {
             this.hpBar.destroy();
@@ -142,7 +152,10 @@ class ShooterScene extends Phaser.Scene {
             repeat: 0,
             hideOnComplete: true
         });
-
+        
+        // 功能: 建立物理群組來管理敵人，並指定使用自訂的 Enemy 類別
+        // 原理: `group` 是一個可以存放大量同類型物理物件的容器。`classType: Enemy` 告訴群組在需要新物件時，應該要建立自訂的 Enemy 實體
+        // 為何: 這樣可以讓在 Enemy 類別中集中管理血量、血條等複雜邏輯，讓主場景的程式碼更簡潔
         this.enemies = this.physics.add.group({
             classType: Enemy,
             runChildUpdate: true
@@ -153,7 +166,10 @@ class ShooterScene extends Phaser.Scene {
                 this.updateEntityCount();
             }
         });
-
+        
+        // 功能: 設定子彈與敵人、玩家與敵人之間的「重疊」偵測
+        // 原理: `overlap` 會持續檢查兩個群組/物件的物理身體是否發生重疊。一旦重疊，就會觸發指定的回呼函式 (如 bulletHitEnemy)
+        // 為何: 只需要「知道」它們碰到了，並觸發對應的邏輯 (扣血/遊戲結束)，不需要產生任何物理反彈效果，所以 `overlap` 是最適合且效能最好的選擇
         this.physics.add.overlap(this.bullets, this.enemies, this.bulletHitEnemy, null, this);
         this.physics.add.overlap(this.player, this.enemies, this.playerHitEnemy, null, this);
 
@@ -180,6 +196,9 @@ class ShooterScene extends Phaser.Scene {
 
         this.starfield.tilePositionY -= 2;
 
+        // 功能: 設定玩家的速度
+        // 原理: `setVelocity` 是 Arcade Physics 提供的函式，用於直接設定一個物理身體的速度向量
+        // 為何: 這是控制物理角色移動最直接的方式。先將速度歸零，然後根據按鍵輸入設定新的速度。物理引擎會根據這些速度值自動更新飛船的位置
         this.player.setVelocity(0);
         if (this.keys.A.isDown || this.keys.LEFT.isDown) {
             this.player.setVelocityX(-300);
@@ -242,6 +261,10 @@ class ShooterScene extends Phaser.Scene {
         if(this.enemySpawner) this.enemySpawner.destroy();
         
         this.gameOver = true;
+        
+        // 功能: 暫停整個場景的物理引擎
+        // 原理: `this.physics.pause()` 會凍結所有物理計算，物件將停止移動、不再觸發碰撞或重疊事件
+        // 為何: 當遊戲結束時，希望所有物件都停在原位，等待重新開始
         this.physics.pause();
 
         this.add.sprite(player.x, player.y, 'explosion').play('explode');
@@ -268,6 +291,10 @@ const config = {
     type: Phaser.AUTO,
     width: 800,
     height: 600,
+    
+    // 功能: 在遊戲設定中啟用 Arcade 物理引擎
+    // 原理: `default: 'arcade'` 將 Arcade Physics 設為預設引擎
+    // 為何: 這是所有物理效果的基礎。注意，在此遊戲中沒有設定全域重力，因為太空中的物件不應受其影響
     physics: {
         default: 'arcade',
         arcade: { debug: false }
